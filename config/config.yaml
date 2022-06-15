@@ -1,8 +1,11 @@
 network:
   name: resnet18
 
+  transfer_network:
+    name: resnet18Transfer
+
   # Specify a folder containing a pre-trained model to fine-tune. If training from scratch, pass None.
-  fine_tune_from: 'resnet-18_40-epochs'
+  fine_tune_from: 'pretrained_network'
 
   projection_head:
     mlp_hidden_size: 512
@@ -10,13 +13,13 @@ network:
 
 data_transforms:
   s: 1
-  input_shape: (96,96,3)
+  input_shape: (640,640,3)
 
 trainer:
-  batch_size: 64
+  batch_size: 64 #64
   m: 0.996 # momentum update
-  checkpoint_interval: 5000
-  max_epochs: 40
+  checkpoint_interval: 100
+  max_epochs: 5 #40
   num_workers: 4
 
 optimizer:
@@ -24,3 +27,14 @@ optimizer:
     lr: 0.03
     momentum: 0.9
     weight_decay: 0.0004
+
+transfer_datasets:
+  paths:
+    <path_to_dataset1>:
+    <path_to_dataset2>:
+  download:
+    now: True
+  transforms:
+    input_shape: (640,640,3)
+    s: 1
+    
