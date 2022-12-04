@@ -4,7 +4,9 @@ from torch.nn import Linear, Sequential
 #from torchvision.models import resnet18
 from shutil import copyfile
 
+from torch.autograd.functional import jacobian
 
+######### UTILS ##################
 def _create_model_training_folder(writer, files_to_same):
     model_checkpoints_folder = os.path.join(writer.log_dir, 'checkpoints')
     if not os.path.exists(model_checkpoints_folder):
@@ -91,3 +93,23 @@ def load_model_state_dict(relative_path,filename):
     dir_name = os.path.dirname(__file__)
     model = torch.load(os.path.join(dir_name, relative_path, filename))
     return model
+
+def jacobiann(model, dataloader, device, create_graph=False, strict=False, vectorize=False):
+    torch._C._debug_only_display_vmap_fallback_warnings(True)
+    
+    n = 12*24
+    j, k = 0, 1
+    iter=dataloader._get_iterator()
+    i = 0
+    #offset = 1000
+    for i in range(n):
+        Xy = iter.next()
+        X = Xy[0]
+        y = Xy[1]
+        X, y = X.to(device), y.to(device)
+        if i == 0:
+            dOutdIn = jacobian(model, X[j:k,:,:])
+        else:
+            dOutdIn += jacobian(model, X[j:k,:,:])
+    dOutdIn /= n
+    return dOutdIn.squeeze().cpu() # Move to CPU
