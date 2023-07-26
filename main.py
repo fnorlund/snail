@@ -1,45 +1,129 @@
+# export 'PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512'
+#from fastapi import FastAPI
 import os
 import sys
 import copy
-from click import pass_context
-from numpy import True_
+#from click import pass_context
+import numpy as np
+#from numpy import True_
 sys.path.append('./')
 import torch
-from torch.optim import lr_scheduler
+torch.cuda.empty_cache()
+from torch.optim import lr_scheduler, Adam
 import yaml
 from torchvision import datasets
 from data.multi_view_data_injector import MultiViewDataInjector
 #from torchvision.models import resnet18
 from models.mlp_head import MLPHead
-from models.resnet_base_network import ResNet18, ResNet18Transfer
-from trainer import BYOLTrainer, BYOLTransferTrainer
+from models.resnet_base_network import ResNet18Transfer, ResNet18
+from trainer import BYOLTransferTrainer, BYOLTrainer
 import utils
-from data.transforms import get_simclr_data_transforms, q_transforms
+from data.transforms import get_simclr_data_transforms, infer_transforms
 from datamanager import SlugDataset
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+'''
+learn_or_infer = '_' # 'train', 'infer', 'deploy'
+training_mode = 'transfer_learning' # 'transfer_learning', 'contrastive_learning'
+model2use = '_' # 'model.pth'=transfer trained; 'online_network_transfer'=new pretrained resnet18.pth model
+save_new_model = '' # False, True
+
+device = 'cuda' if torch.cuda.is_available() and learn_or_infer != 'deploy' else 'cpu'
 noGPUs = torch.cuda.device_count()
 print('Torch version:',torch.__version__)
-torch.manual_seed(0)
-
-learn_or_infer = 'infer' # 'train', 'infer'
-training_mode = 'transfer_learning' # 'contrastive_learning'
-model2use = 'model.pth' # 'model.pth'=transfer trained; 'online_network_transfer'=new pretrained resnet18.pth model
-save_new_model = False
+#torch.manual_seed(0)
+torch.seed()
+'''
+cfg = False
 
 def main(cmds):
+    import io
+    a=b'\x0f'.hex()
+    b=b'\x10'.hex()
+    c=b'\x0f'
+    d=b'\x10'
+    int.from_bytes(b'\x0f','big')
+
+    learn_or_infer = '_' # 'train', 'infer', 'deploy'
+    training_mode = 'transfer_learning' # 'transfer_learning', 'contrastive_learning'
+    model2use = '_' # 'model.pth'=transfer trained; 'online_network_transfer'=new pretrained resnet18.pth model
+    save_new_model = '' # False, True
+
+    '''
+    device = 'cuda' if torch.cuda.is_available() and learn_or_infer != 'deploy' else 'cpu'
+    noGPUs = torch.cuda.device_count()
+    print('Torch version:',torch.__version__)
+    #torch.manual_seed(0)
+    torch.seed()
+    '''
     print('Command arguments:', str(cmds))
     argc = cmds
+    cfg = False
+    debug = True
+    
+    # Continue to train the model 'model.pth' @'runs/pretrained_network/checkpoints/model.pth'
+    # python3 main.py train transfer_learning model
+    #argc = ['main.py', 'train', 'transfer_learning', 'model']
+
+    # Create a new model, 'pretrained_network/resnet18.pth' and a copy 'runs/pretrained_network/checkpoints/model.pth'
+    # python3 main.py train transfer_learning online_network_transfer
+    #argc = ['main.py', 'train', 'transfer_learning', 'online_network_transfer']
+    
+    # Deploy to Torch Serve
+    # python3 main.py deploy
+    #argc = ['main.py', 'deploy']
+    
+    # Infer
+    # python3 main.py infer
+    #argc = ['main.py', 'infer']
     print("argc:",argc)
-    if len(argc) > 1 and argc[1] == 'infer' or learn_or_infer == 'infer':
+
+    if len(argc) > 1 and argc[1] == 'infer':
         import inferer
-    else:
-        pass
+        learn_or_infer = 'infer'
+        model2use = 'model.pth'
+        cfg = True
+
+    elif len(argc) > 1 and argc[1] == 'train':
+        learn_or_infer = 'train'
+        if argc[2] == 'transfer_learning':
+            training_mode = 'transfer_learning'
+            if argc[3] == 'model':
+                model2use = 'model.pth'
+                save_new_model = False
+                cfg = True
+            elif argc[3] == 'online_network_transfer':
+                model2use = 'online_network_transfer'
+                save_new_model = True
+                cfg = True
+            else:
+                cfg = False
+    elif len(argc) > 1 and argc[1] == 'deploy':
+        learn_or_infer = 'deploy'
+        model2use = 'model.pth'
+        save_new_model = False
+        cfg = True
+
+    if not cfg:
+        # Command examples
+        # main.py train transfer_learning model
+        # main.py train transfer_learning online_network_transfer
+        # main.py infer
+        # main.py deploy
+        print('Debug or no such command. Ctrl-C to exit')
+        print('Available arguments arg1, arg2, arg3')
+        print('infer|train|deploy, transfer_learning, model|online_network_transfer')
+        #exit(0)
     
     config = yaml.load(open("./config/config.yaml", "r"), Loader=yaml.FullLoader)
+    #data_dir = './manual_download/local/fn'
+    data_dir = './manual_download/local/fn_3_classes'
+    #data_dir = './manual_download/local/q'
 
-    #device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    #print(f"Training with: {device}")
+    device = 'cuda' if torch.cuda.is_available() and learn_or_infer != 'deploy' else 'cpu'
+    noGPUs = torch.cuda.device_count()
+    print('Torch version:',torch.__version__)
+    #torch.manual_seed(0)
+    torch.seed()
 
     
     if training_mode == 'contrastive_learning':
@@ -55,7 +139,8 @@ def main(cmds):
 
     if training_mode == 'transfer_learning':
         # FN: Create transfer model from pytorch (torchvision) pretrainded resnet18
-        slugdataset = SlugDataset(data_dir='./manual_download/local/fn', **config['transfer_datasets'])
+        
+        slugdataset = SlugDataset(data_dir=data_dir, **config['transfer_datasets'])
         online_network_transfer = ResNet18Transfer(**config['network']['transfer_network'])
         pretrained_folder = config['network']['fine_tune_from']
         #preTrainedModel = utils.create_transfer_model('resnet18')
@@ -76,9 +161,14 @@ def main(cmds):
 
             # load pre-trained model parameters
             if model2use == 'online_network_transfer': # start with new transfer training model
-                load_params = torch.load(os.path.join(os.path.join(checkpoints_folder, 'resnet18.pth')),
+                if save_new_model:
+                    path =  '/home/fredrik/source/snail/pretrained_network/resnet18.pth'
+                    load_params = torch.load(path,
+                                     map_location=torch.device(torch.device(device)))
+                else:
+                    load_params = torch.load(os.path.join(os.path.join(checkpoints_folder, 'resnet18.pth')),
                                      map_location=torch.device(torch.device(device))) 
-                online_network_transfer.load_state_dict(load_params)
+                online_network_transfer.load_state_dict(load_params['online_network_state_dict'])
                 model = online_network_transfer
             
             elif model2use == 'online_network': # original network
@@ -131,10 +221,15 @@ def main(cmds):
         
     elif training_mode == 'transfer_learning' and learn_or_infer == 'train':
         #optimizer = torch.optim.SGD(model.resnet.fc.parameters(), **config['optimizer']['params'])
-        optimizer = torch.optim.SGD(list(model.parameters()), **config['optimizer']['params'])
+        optimizer = torch.optim.Adam(list(model.parameters()), **config['optimizer']['Adam']['params'])
+        #optimizer = torch.optim.SGD(list(model.parameters()), **config['optimizer']['params'])
         exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
         if model2use == 'model.pth': # Continue with last saved optim params
-            optimizer.load_state_dict(load_params['optimizer_state_dict'])
+            try: 
+                optimizer.load_state_dict(load_params['optimizer_state_dict'])
+            except:
+                # Let trainer save optimizer_state_dict first run
+                pass
             
         trainer = BYOLTransferTrainer(online_network=model,
                             target_network=None,
@@ -148,18 +243,30 @@ def main(cmds):
         trainer.train(slugdataset.image_datasets)
 
     elif learn_or_infer == 'infer':
-        inferer = inferer.BYOLTransferInferer(model,slugdataset.image_val_datasets,q_transforms,device,**config['transfer_datasets'])
+        inferer = inferer.BYOLTransferInferer(model,slugdataset.image_val_datasets,infer_transforms,device,**config['transfer_datasets'])
         if inferer != None:
-            try:
-                path_to_infer_image = os.path.join(os.path.dirname(__file__), 'manual_download', 'infer_images')
-                #inferer.infer(path_to_infer_image) #single image
-                inferer.infer_from_path(path_to_infer_image) #single image
-                #inferer.infer()
-            except:
-                pass
+            path_to_infer_image = os.path.join(os.path.dirname(__file__), 'manual_download', 'infer_images')
+            #inferer.infer(path_to_infer_image) #single image
+            #path_to_infer_dirs = os.path.join(os.path.dirname(__file__), data_dir, 'train')
+            path_to_infer_dirs = os.path.join(os.path.dirname(__file__), data_dir, 'val')
+            inferer.infer_from_dirs(path_to_infer_dirs) #dirs
+            #inferer.infer_from_path(path_to_infer_image) #single image
+            #inferer.infer()
         else:
             pass
+    
+    elif learn_or_infer == 'deploy' and model2use == 'model.pth':
+        load_params = torch.load(os.path.join(os.path.join(checkpoints_folder, 'model.pth')),
+                                     map_location=torch.device(torch.device(device)))
+        online_network_transfer.load_state_dict(load_params['online_network_state_dict'])
+        model = online_network_transfer
+        model.eval() # Set to evaluation/infer mode
+        scripted_module = torch.jit.script(model)
+        torch.jit.save(scripted_module, 'scripted_module.pth')
+        torch.jit.save(scripted_module, os.path.join('./torchserve/mar_files','scripted_module.pth'))
+        print('File scripted_module.pth is copied to folder torchserve\mar_files. Run torch-model-archiver')
+        q = torch.jit.load('scripted_module.pth')
 
 if __name__ == '__main__':
+    
     main(sys.argv)
-

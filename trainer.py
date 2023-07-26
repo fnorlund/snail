@@ -127,8 +127,12 @@ class BYOLTransferTrainer:
         _create_model_training_folder(self.writer, files_to_same=["./config/config.yaml", "main.py", 'trainer.py'])
         
         #self.criterion = torch.nn.CrossEntropyLoss()
-        self.criterion = torch.nn.BCEWithLogitsLoss()
-
+        #self.criterion = torch.nn.BCEWithLogitsLoss(reduction='mean')
+        # https://pytorch.org/docs/stable/generated/torch.nn.NLLLoss.html
+        # [EMPTY,NOT_SLUG,SLUG]
+        self.criterion = torch.nn.NLLLoss(weight=torch.tensor([1.67,1.68,1.2]).to(device),reduction='mean')
+        # with 2 classes [1.55,1]
+        # with 3 classes [1.49,2.65,1.]
     @staticmethod
     def crossEntropy_loss(criterion,x,y):
         loss = criterion(x,y)
@@ -196,7 +200,7 @@ class BYOLTransferTrainer:
 
                     if niter == 0:
                         grid = torchvision.utils.make_grid(batch_view_1[:2])
-                        self.writer.add_image('views_1', grid, global_step=niter)
+                        #self.writer.add_image('views_1', grid, global_step=niter)
 
                         #grid = torchvision.utils.make_grid(batch_view_2[:32])
                         #self.writer.add_image('views_2', grid, global_step=niter)
@@ -213,17 +217,19 @@ class BYOLTransferTrainer:
 
                     # statistics
                     running_loss += loss.item() * batch_view_1.size(0)
-                    running_corrects += torch.div(torch.sum(preds.to(self.device) == targets.data), targets.data.shape[1], rounding_mode='trunc')
+                    #running_corrects += torch.div(torch.sum(preds.to(self.device) == targets.data), targets.data.shape[1], rounding_mode='trunc')
+                    running_corrects += torch.sum(preds.to(self.device) == targets.data)
                     
                     #self._update_target_network_parameters()  # update the key encoder
                     niter += 1
-                    # self.resnet.layer1[0].conv1.weight  Första=5.7593e-02
+            
                 if phase == 'train':
-                    #self.scheduler.step() # NOT READY
+                    self.scheduler.step() # Schedules step taken by optimizer
                     pass
 
                 epoch_loss = running_loss / dataset_sizes[phase]
                 epoch_acc = running_corrects.double() / dataset_sizes[phase]
+                #epoch_acc = running_corrects.double() / niter
 
                 print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
 
@@ -231,8 +237,12 @@ class BYOLTransferTrainer:
                 if phase == 'val' and epoch_acc > best_acc:
                     best_acc = epoch_acc
                     best_model_wts = copy.deepcopy(self.online_network.state_dict())
+                
+                # also deep copy this run's, epoch model
+                if phase == 'val' and epoch_acc <= best_acc:
+                    epoch_model_wts = copy.deepcopy(self.online_network.state_dict())
 
-            print("End of epoch {}, Loss={}".format(epoch_counter, loss))
+            print("End of epoch {}, Epoch loss={}".format(epoch_counter, loss))
 
         time_elapsed = time.time() - since
         print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
@@ -241,17 +251,31 @@ class BYOLTransferTrainer:
         # load best model weights
         self.online_network.load_state_dict(best_model_wts)
 
-        # save checkpoints
+        # save best model checkpoints
         self.save_model(os.path.join(model_checkpoints_folder, 'model.pth'))
         self.save_model(os.path.join('./runs/pretrained_network/checkpoints', 'model.pth'))
 
-        return self.online_network
+        # load epoch model weights
+        self.online_network.load_state_dict(epoch_model_wts)
+        
+        # save best model checkpoints
+        self.save_model(os.path.join(model_checkpoints_folder, 'model_epoch.pth'))
+        self.save_model(os.path.join('./runs/pretrained_network/checkpoints', 'model_epoch.pth'))
+
+        return None # self.online_network
 
     def prediction_transform(self,l):
         y =[]
         for x in l:
             y.append([1.,0.] if x==0 else [0.,1.])
         return torch.FloatTensor(y)
+
+    def prediction_transform_1(self,batch):
+        # Use this when NLLLoss is used as criterion
+        #softmax = torch.swapaxes(torch.div(torch.swapaxes(batch,0,1),batch.sum(1)),0,1)
+        a = torch.exp(batch)
+        value, index = torch.max(a,1)
+        return value, index
     
     def update(self, batch_view_1, targets):
         #loss = 0
@@ -269,10 +293,11 @@ class BYOLTransferTrainer:
 
         #loss = self.regression_loss(predictions_from_view_1, targets)
         loss = self.crossEntropy_loss(self.criterion, predictions_from_view_1, targets)
-        _, preds = torch.max(predictions_from_view_1, 1)
-        preds = self.prediction_transform(preds)
+        #_, preds = torch.max(predictions_from_view_1/sum(sum(predictions_from_view_1)),1)
+        #_, preds = torch.max(predictions_from_view_1, 1)
+        _, index_preds = self.prediction_transform_1(predictions_from_view_1)
         #loss += self.regression_loss(predictions_from_view_2, targets_to_view_2)
-        return loss, preds
+        return loss, index_preds
         #return loss.mean(), preds
 
     def save_model(self, PATH):

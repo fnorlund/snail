@@ -3,6 +3,8 @@ network:
 
   transfer_network:
     name: resnet18Transfer
+    no_classes: 3 # SLUG, NOT_SLUG, (EMPTY)
+    # OBS: no_classes finns också nedan. SKA VARA LIKA
 
   # Specify a folder containing a pre-trained model to fine-tune. If training from scratch, pass None.
   fine_tune_from: 'pretrained_network'
@@ -11,30 +13,40 @@ network:
     mlp_hidden_size: 512
     projection_size: 128
 
-data_transforms:
-  s: 1
-  input_shape: (640,640,3)
-
-trainer:
-  batch_size: 64 #64
-  m: 0.996 # momentum update
-  checkpoint_interval: 100
-  max_epochs: 5 #40
-  num_workers: 4
-
-optimizer:
-  params:
-    lr: 0.03
-    momentum: 0.9
-    weight_decay: 0.0004
-
 transfer_datasets:
-  paths:
-    <path_to_dataset1>:
-    <path_to_dataset2>:
+  no_classes: 3 # SLUG, NOT_SLUG, (EMPTY)
+  # OBS: no_classes finns också ovan. SKA VARA LIKA
   download:
     now: True
   transforms:
-    input_shape: (640,640,3)
+    #input_shape: (640,640,3)
+    input_shape: (224,224,3)
+    #input_shape: (480,640,3)
+    #input_shape: (1232,1640,3)
     s: 1
     
+data_transforms:
+  #s: 1
+  #input_shape: (1640,1232,3)
+  #input_shape: (640,640,3)
+
+trainer:
+  batch_size: 85 #20,30,50
+  m: 0.996 # momentum update
+  checkpoint_interval: 100
+  max_epochs: 1 #40
+  num_workers: 6
+
+optimizer:
+  params:
+    #lr: 0.0005 #0.03
+    momentum: 0.9 #0.9
+    weight_decay: 0.0004 #0.0004
+  Adam:
+    params:
+      lr: 0.001
+      betas: [0.9,0.999]
+      eps: 0.00000001
+      weight_decay: 0.0004
+      amsgrad: False
+

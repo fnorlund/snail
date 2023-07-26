@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import time
 import os
 import copy
-from data.transforms import transfer_transforms, q_transforms, target_transforms
+from data.transforms import transfer_transforms, infer_transforms, target_transforms
 from torch.utils.tensorboard import SummaryWriter
 
 print('Torchvision version:',torchvision.__version__)
@@ -44,11 +44,12 @@ class SlugDataset():
     def __init__(self, data_dir, *args, **kwargs):
         super(SlugDataset, self).__init__()
         self.kwargs = kwargs
-        self.input_shape = self.kwargs['transforms']['input_shape'],
+        self.input_shape = self.kwargs['transforms']['input_shape']
+        self.no_classes = self.kwargs['no_classes']
         self.data_transforms = transfer_transforms(
             self.kwargs['transforms']['input_shape'], 
             self.kwargs['transforms']['s'])
-        self.q_transforms = q_transforms(
+        self.q_transforms = infer_transforms(
             self.kwargs['transforms']['input_shape'], 
             self.kwargs['transforms']['s'])
 
@@ -62,10 +63,11 @@ class SlugDataset():
         self.img_size = self.kwargs['transforms']['input_shape'] 
        
         self.image_dataset1 = {x: datasets.ImageFolder(os.path.join(self.data_dir, x), transform=self.data_transforms[x], 
-                                target_transform=target_transforms) for x in ['train', 'val']} # data_transforms
+                                target_transform=self.target_transforms) for x in ['train', 'val']} # data_transforms
+        '''
         self.image_dataset2 = {x: datasets.ImageFolder(os.path.join(self.data_dir, x), transform=self.q_transforms, 
-                                target_transform=target_transforms) for x in ['train', 'val']} # data_transforms
-        
+                                target_transform=self.target_transforms) for x in ['train', 'val']} # data_transforms
+        '''
         
         self.image_datasets = self.image_dataset1
         self.image_train_datasets = ConcatDataset([self.image_dataset1['train']])
